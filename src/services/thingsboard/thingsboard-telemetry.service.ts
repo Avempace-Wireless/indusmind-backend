@@ -105,14 +105,23 @@ export class ThingsboardTelemetryService {
 
       const endpoint = `/api/plugins/telemetry/${entityType}/${entityId}/values/timeseries`
 
+      const baseURL = (client.defaults && client.defaults.baseURL) ? String(client.defaults.baseURL) : ''
       this.logger.info(
         `Fetching telemetry: ${entityType}/${entityId} keys=${keys.join(',')} range=${startTs}-${endTs}`
+      )
+      this.logger.info(
+        `Request URL: ${baseURL}${endpoint}`
+      )
+      this.logger.info(
+        `Request params: ${JSON.stringify(params)}`
       )
 
       const response = await client.get(endpoint, {
         params,
         validateStatus: () => true, // Handle all status codes
       })
+      this.logger.debug(`ThingsBoard response status=${response.status}`)
+      this.logger.info(`ThingsBoard response data: ${JSON.stringify(response.data)}`)
 
       if (response.status === 200) {
         const dataKeys = Object.keys(response.data || {})
