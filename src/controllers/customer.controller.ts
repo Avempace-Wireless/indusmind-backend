@@ -4,11 +4,11 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import * as customerService from './customer.service.js';
-import { logger } from '../../utils/logger.js';
+import * as customerService from '../services/customer.service.js';
+import { logger } from '../utils/logger.js';
 
 /**
- * GET /api/customer/devices
+ * GET /customer/devices
  * Fetch all Indusmind customer devices
  */
 export const getCustomerDevices = async (
