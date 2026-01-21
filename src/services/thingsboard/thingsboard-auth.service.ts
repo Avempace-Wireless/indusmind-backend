@@ -34,12 +34,22 @@ export class ThingsboardAuthService {
     this.baseUrl = baseUrl
     this.username = username
     this.password = password
-    console.log('THINGSBOARD_USERNAME:', this.username)
-    console.log('THINGSBOARD_PASSWORD:', this.password
-    )
-    console.log('THINGSBOARD_BASE_URL:', this.baseUrl)
+    this.logger.info({
+      THINGSBOARD_BASE_URL: this.baseUrl,
+      THINGSBOARD_USERNAME_SET: !!this.username,
+      THINGSBOARD_PASSWORD_SET: !!this.password
+    }, 'ThingsBoard config loaded')
+    
     if (!this.username || !this.password) {
-      throw new Error('ThingsBoard credentials not provided in environment variables')
+      this.logger.error({
+        baseUrl: this.baseUrl,
+        usernameProvided: !!this.username,
+        passwordProvided: !!this.password
+      }, 'ThingsBoard credentials missing')
+      throw new Error(
+        'ThingsBoard credentials not provided in environment variables. ' +
+        'Please set THINGSBOARD_USERNAME and THINGSBOARD_PASSWORD environment variables.'
+      )
     }
   }
 
