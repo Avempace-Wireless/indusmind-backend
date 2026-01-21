@@ -120,8 +120,7 @@ export class ThingsboardTelemetryService {
         params,
         validateStatus: () => true, // Handle all status codes
       })
-      this.logger.debug(`ThingsBoard response status=${response.status}`)
-      this.logger.info(`ThingsBoard response data: ${JSON.stringify(response.data)}`)
+
 
       if (response.status === 200) {
         const dataKeys = Object.keys(response.data || {})

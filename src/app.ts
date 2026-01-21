@@ -2,7 +2,7 @@ import express from "express";
 import compression from "compression";
 import cors from "cors";
 import helmet from "helmet";
-import { routes } from "./modules/index.js";
+import { routes } from "./routes/index.js";
 import { requestLogger } from "./middlewares/request-logger.js";
 import { errorMiddleware } from "./middlewares/error.middleware.js";
 

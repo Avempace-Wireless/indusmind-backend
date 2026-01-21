@@ -5,12 +5,10 @@ import { logger } from "./utils/logger.js";
 const app = createApp();
 
 async function start() {
-  const server = app.listen(config.port, () => {
-    logger.info({ port: config.port }, "Server listening");
-  });
+  const server = app.listen(config.port);
 
   server.on("error", (err) => {
-    logger.error({ err }, "Server error");
+    logger.error("Server error:", err instanceof Error ? err.message : String(err));
     process.exit(1);
   });
 }

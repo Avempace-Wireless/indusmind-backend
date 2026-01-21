@@ -5,11 +5,11 @@ import { logger } from "./utils/logger.js";
 const app = createApp();
 
 const server = app.listen(config.port, () => {
-  logger.info({ port: config.port }, "Server listening");
+  logger.info(`Server started on port ${config.port}`);
 });
 
 const shutdown = (signal: string) => {
-  logger.info({ signal }, "Shutting down");
+  logger.info(`Shutting down due to ${signal}`);
   server.close(() => process.exit(0));
 };
 

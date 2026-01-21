@@ -4,12 +4,12 @@
  */
 
 import { Router } from 'express';
-import { getCustomerDevices } from './customer.controller.js';
+import { getCustomerDevices } from '../controllers/customer.controller.js';
 
 export const customerRouter = Router();
 
 /**
- * GET /api/customer/devices
+ * GET /customer/devices
  * Fetch all Indusmind customer devices
  */
 customerRouter.get('/devices', getCustomerDevices);

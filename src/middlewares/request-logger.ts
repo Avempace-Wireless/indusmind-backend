@@ -1,9 +1,6 @@
-import pinoHttpModule from "pino-http";
-import { logger } from "../utils/logger.js";
+import { NextFunction, Request, Response } from "express";
 
-const pinoHttp = pinoHttpModule.default || pinoHttpModule;
-
-export const requestLogger = pinoHttp({
-  logger,
-  autoLogging: true,
-});
+// Request logger intentionally silent to avoid noisy logs
+export const requestLogger = (_req: Request, _res: Response, next: NextFunction) => {
+  next();
+};

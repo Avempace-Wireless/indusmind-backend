@@ -33,7 +33,7 @@ export class DeviceService {
     try {
       // Return cached devices if still fresh
       if (!forceRefresh && this.devicesCache && this.isCacheFresh()) {
-        deviceLogger.debug('Returning cached devices')
+
         return this.devicesCache
       }
 
