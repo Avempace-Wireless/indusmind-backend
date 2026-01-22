@@ -36,7 +36,7 @@ export class ThingsboardAuthService {
     this.password = password
     
     // Log environment variable status for debugging
-    this.logger.info({
+    this.logger.info('ThingsBoard config loaded', {
       THINGSBOARD_BASE_URL: this.baseUrl,
       THINGSBOARD_USERNAME_SET: !!this.username,
       THINGSBOARD_PASSWORD_SET: !!this.password,
@@ -44,14 +44,14 @@ export class ThingsboardAuthService {
       THINGSBOARD_PASSWORD_FROM_ENV: !!process.env.THINGSBOARD_PASSWORD,
       USERNAME_VALUE: this.username ? `${this.username.substring(0, 10)}...` : 'EMPTY',
       ALL_ENV_VARS: Object.keys(process.env).filter(k => k.includes('THINGS')).join(', ')
-    }, 'ThingsBoard config loaded')
+    })
     
     if (!this.username || !this.password) {
-      this.logger.error({
+      this.logger.error('ThingsBoard credentials missing', {
         baseUrl: this.baseUrl,
         usernameProvided: !!this.username,
         passwordProvided: !!this.password
-      }, 'ThingsBoard credentials missing')
+      })
       throw new Error(
         'ThingsBoard credentials not provided in environment variables. ' +
         'Please set THINGSBOARD_USERNAME and THINGSBOARD_PASSWORD environment variables.'
