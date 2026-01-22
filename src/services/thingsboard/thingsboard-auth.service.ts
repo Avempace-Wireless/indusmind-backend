@@ -28,16 +28,22 @@ export class ThingsboardAuthService {
 
   constructor(
     baseUrl: string = process.env.THINGSBOARD_BASE_URL || 'https://portal.indusmind.net',
-    username: string = process.env.THINGSBOARD_USERNAME || '',
-    password: string = process.env.THINGSBOARD_PASSWORD || ''
+    username: string = process.env.THINGSBOARD_USERNAME || 'indusmind.admin@indusmind.io',
+    password: string = process.env.THINGSBOARD_PASSWORD || 'IndrT--968$$$1dfvcJUIop'
   ) {
     this.baseUrl = baseUrl
     this.username = username
     this.password = password
+    
+    // Log environment variable status for debugging
     this.logger.info({
       THINGSBOARD_BASE_URL: this.baseUrl,
       THINGSBOARD_USERNAME_SET: !!this.username,
-      THINGSBOARD_PASSWORD_SET: !!this.password
+      THINGSBOARD_PASSWORD_SET: !!this.password,
+      THINGSBOARD_USERNAME_FROM_ENV: !!process.env.THINGSBOARD_USERNAME,
+      THINGSBOARD_PASSWORD_FROM_ENV: !!process.env.THINGSBOARD_PASSWORD,
+      USERNAME_VALUE: this.username ? `${this.username.substring(0, 10)}...` : 'EMPTY',
+      ALL_ENV_VARS: Object.keys(process.env).filter(k => k.includes('THINGS')).join(', ')
     }, 'ThingsBoard config loaded')
     
     if (!this.username || !this.password) {
