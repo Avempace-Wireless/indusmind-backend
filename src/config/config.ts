@@ -5,9 +5,9 @@ dotenv.config();
 
 // Preprocess environment variables to trim whitespace
 const trimmedEnv = {
-  NODE_ENV: (process.env.NODE_ENV || "").trim() || undefined,
-  PORT: (process.env.PORT || "").trim() || undefined,
-  LOG_LEVEL: (process.env.LOG_LEVEL || "").trim() || undefined,
+  NODE_ENV: process.env.NODE_ENV?.trim() || undefined,
+  PORT: process.env.PORT?.trim() || undefined,
+  LOG_LEVEL: process.env.LOG_LEVEL?.trim() || undefined,
 };
 
 const envSchema = z.object({
