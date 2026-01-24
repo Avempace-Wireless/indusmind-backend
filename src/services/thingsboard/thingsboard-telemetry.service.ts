@@ -106,8 +106,24 @@ export class ThingsboardTelemetryService {
       const endpoint = `/api/plugins/telemetry/${entityType}/${entityId}/values/timeseries`
 
       const baseURL = (client.defaults && client.defaults.baseURL) ? String(client.defaults.baseURL) : ''
+      
+      // Build full URL for testing
+      const queryString = Object.entries(params)
+        .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+        .join('&')
+      const fullUrl = `${baseURL}${endpoint}?${queryString}`
+      
       this.logger.info(
         `Fetching telemetry: ${entityType}/${entityId} keys=${keys.join(',')} range=${startTs}-${endTs}`
+      )
+      this.logger.info(
+        `Timestamp details - Start: ${startTs}ms (${new Date(startTs).toISOString()}), End: ${endTs}ms (${new Date(endTs).toISOString()})`
+      )
+      this.logger.info(
+        `Keys passed to API: ${JSON.stringify(keys)}`
+      )
+      this.logger.info(
+        `Full API URL (for Postman testing): ${fullUrl}`
       )
       this.logger.info(
         `Request URL: ${baseURL}${endpoint}`
@@ -115,12 +131,33 @@ export class ThingsboardTelemetryService {
       this.logger.info(
         `Request params: ${JSON.stringify(params)}`
       )
+      this.logger.info(
+        `Parameters being sent - interval: ${params.interval}, agg: ${params.agg}, orderBy: ${params.orderBy}, limit: ${params.limit}`
+      )
+      
+      // Log authorization token for Postman testing
+      const authHeader = client.defaults?.headers?.common?.['Authorization'] || client.defaults?.headers?.['Authorization']
+      if (authHeader) {
+        this.logger.info(
+          `Authorization Header (use in Postman): ${authHeader}`
+        )
+      }
+      
+      this.logger.info(
+        `⚠️  COMPARISON: Working URL only passes: keys, startTs, endTs, useStrictDataTypes. Our request also passes: interval, agg, orderBy, limit`
+      )
 
       const response = await client.get(endpoint, {
         params,
         validateStatus: () => true, // Handle all status codes
       })
 
+      this.logger.info(
+        `API Response Status: ${response.status}`
+      )
+      this.logger.info(
+        `API Response Data: ${JSON.stringify(response.data)}`
+      )
 
       if (response.status === 200) {
         const dataKeys = Object.keys(response.data || {})

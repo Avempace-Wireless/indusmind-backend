@@ -5,6 +5,7 @@ import { ThingsboardAuthService } from '../services/thingsboard/thingsboard-auth
 import { DeviceService } from '../services/device.service.js'
 import { KPICalculatorService } from '../services/kpi-calculator.service.js'
 import { PuissanceService } from '../services/puissance.service.js'
+import { createEnergyHistoryController } from '../controllers/energy-history.controller.js'
 
 const routerLogger = logger.child({ module: 'TelemetryRouter' })
 
@@ -25,6 +26,7 @@ export function createTelemetryRoutes(
   const router = Router()
   const kpiCalculator = new KPICalculatorService()
   const puissanceService = new PuissanceService(telemetryService, deviceService)
+  const { getEnergyHistory, getDeviceEnergyHistory, getAvailableMetrics } = createEnergyHistoryController(telemetryService)
 
   /**
    * GET /api/telemetry/devices
@@ -610,6 +612,11 @@ export function createTelemetryRoutes(
       })
     }
   })
+
+  // Energy History Routes
+  router.get('/energy-history', getEnergyHistory)
+  router.get('/:deviceUUID/energy-history', getDeviceEnergyHistory)
+  router.get('/:deviceUUID/available-metrics', getAvailableMetrics)
 
   return router
 }
