@@ -5,6 +5,7 @@ import { ThingsboardAuthService } from '../services/thingsboard/thingsboard-auth
 import { DeviceService } from '../services/device.service.js'
 import { KPICalculatorService } from '../services/kpi-calculator.service.js'
 import { PuissanceService } from '../services/puissance.service.js'
+import { CurrentService } from '../services/current.service.js'
 import { createEnergyHistoryController } from '../controllers/energy-history.controller.js'
 
 const routerLogger = logger.child({ module: 'TelemetryRouter' })
@@ -16,6 +17,7 @@ const routerLogger = logger.child({ module: 'TelemetryRouter' })
  * - GET /api/telemetry/:deviceUUID/timeseries - Get device timeseries data
  * - GET /api/telemetry/:deviceUUID/kpis - Get calculated KPI values for device
  * - GET /api/telemetry/:deviceUUID/puissance - Get all Puissance view KPI values
+ * - GET /api/telemetry/:deviceUUID/current - Get all Current view KPI values
  * - GET /api/telemetry/timeseries - Legacy endpoint with explicit entity type and ID
  */
 export function createTelemetryRoutes(
@@ -26,6 +28,7 @@ export function createTelemetryRoutes(
   const router = Router()
   const kpiCalculator = new KPICalculatorService()
   const puissanceService = new PuissanceService(telemetryService, deviceService)
+  const currentService = new CurrentService(telemetryService, deviceService)
   const { getEnergyHistory, getDeviceEnergyHistory, getAvailableMetrics } = createEnergyHistoryController(telemetryService)
 
   /**
@@ -605,6 +608,80 @@ export function createTelemetryRoutes(
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)
       routerLogger.error(`[Puissance] Request failed: ${errorMsg}`)
+
+      return res.status(502).json({
+        success: false,
+        error: errorMsg,
+      })
+    }
+  })
+
+  /**
+   * GET /api/telemetry/:deviceUUID/current
+   *
+   * Get all Current view KPI values in a single optimized request
+   * Makes 9 batch requests to ThingsBoard to fetch all needed telemetry data
+   * Uses Current_Avg telemetry key from ThingsBoard widgets configuration
+   *
+   * Path Parameters:
+   * - deviceUUID: string - UUID of the device
+   *
+   * Query Parameters:
+   * - debug (optional): boolean - include debug information about requests made
+   *
+   * Example:
+   * GET /api/telemetry/545ffcb0-ab9c-11f0-a05e-97f672464deb/current?debug=true
+   *
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": {
+   *     "instantaneousCurrent": 12.34,              // A (latest Current_Avg)
+   *     "lastHourMin": 10.5,                        // A (last hour minimum)
+   *     "lastHourAverage": 11.8,                    // A (last hour average)
+   *     "lastHourMax": 14.2,                        // A (last hour maximum, MAX aggregation for widget)
+   *     "todayAverage": 12.1,                       // A (today's average)
+   *     "widgetData": [                             // Last hour with 15-min intervals (MAX aggregation)
+   *       { "ts": 1705689600000, "value": 12.1 },
+   *       { "ts": 1705690500000, "value": 13.2 }
+   *     ],
+   *     "hourlyData": [                             // Today's hourly average data (AVERAGE aggregation)
+   *       { "ts": 1705689600000, "value": 11.8 },
+   *       { "ts": 1705693200000, "value": 12.3 }
+   *     ],
+   *     "dailyWeekData": [                          // Last 7 days with daily average (AVERAGE aggregation)
+   *       { "ts": 1705689600000, "value": 12.0 },
+   *       { "ts": 1705776000000, "value": 11.9 }
+   *     ],
+   *     "dailyMonthData": [                         // Last 30 days with daily average (AVERAGE aggregation)
+   *       { "ts": 1705689600000, "value": 12.0 },
+   *       { "ts": 1705776000000, "value": 11.9 }
+   *     ]
+   *   },
+   *   "meta": {
+   *     "deviceUUID": "545ffcb0-ab9c-11f0-a05e-97f672464deb",
+   *     "deviceName": "PM2200 - TGBT Principal",
+   *     "requestedAt": 1705932090674
+   *   },
+   *   "debug": { ... } // if debug=true
+   * }
+   */
+  router.get('/:deviceUUID/current', async (req: Request, res: Response) => {
+    try {
+      const { deviceUUID } = req.params
+      const { debug } = req.query
+
+      const includeDebug = debug && String(debug).toLowerCase() === 'true' ? true : false
+
+      routerLogger.info(`[Current] Request for device: ${deviceUUID}`, { debug: includeDebug })
+
+      // Get Current KPIs
+      const result = await currentService.getCurrentKPIs(deviceUUID, includeDebug)
+
+      return res.json(result)
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      routerLogger.error(`[Current] Request failed: ${errorMsg}`)
 
       return res.status(502).json({
         success: false,
