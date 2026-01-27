@@ -23,10 +23,11 @@ export interface CurrentKPIResponse {
     todayAverage: number | null // Today's average Current_Avg
 
     // Chart data
-    hourlyData: Array<{ ts: number; value: number }> // Today's hourly average current data
-    widgetData: Array<{ ts: number; value: number }> // Last hour data with 15-min intervals (MAX aggregation)
-    dailyWeekData: Array<{ ts: number; value: number }> // Last 7 days daily average current data
-    dailyMonthData: Array<{ ts: number; value: number }> // Last 30 days daily average current data
+    hourlyData: Array<{ ts: number; date: string; value: number }> // Today's hourly average current data
+    widgetData: Array<{ ts: number; date: string; value: number }> // Last hour data with 15-min intervals (MAX aggregation)
+    dailyWeekData: Array<{ ts: number; date: string; value: number }> // Last 7 days daily average current data
+    dailyMonthData: Array<{ ts: number; date: string; value: number | null }> // Last 30 days daily average current data with gaps
+    dailyYearData: Array<{ ts: number; date: string; month: number; monthYear: string; value: number | null }> // Last 12 months monthly average current data (month 1-12)
   }
   meta: {
     deviceUUID: string
@@ -76,6 +77,7 @@ export class CurrentService {
    * 7. Hourly Data: Today's hourly average data (AVERAGE aggregation)
    * 8. Daily Week Data: Last 7 days with 1-day intervals (AVERAGE aggregation)
    * 9. Daily Month Data: Last 30 days with 1-day intervals (AVERAGE aggregation)
+   * 10. Daily Year Data: Last 12 months with 1-month intervals (AVERAGE aggregation)
    */
   async getCurrentKPIs(deviceUUID: string, debug: boolean = false): Promise<CurrentKPIResponse> {
     const requestedAt = Date.now()
@@ -103,6 +105,7 @@ export class CurrentService {
         hourlyData,
         dailyWeekData,
         dailyMonthData,
+        dailyYearData,
       ] = await Promise.all([
         // 1. Instantaneous current (last 24h, latest Current_Avg)
         this.fetchTelemetry(deviceUUID, ['Current_Avg'], timeRanges.last24h.start, timeRanges.last24h.end, {
@@ -158,6 +161,12 @@ export class CurrentService {
           agg: 'AVG',
           interval: 24 * 60 * 60 * 1000, // 1 day
         }),
+
+        // 10. Daily year data: Last 365 days with 1-month intervals (AVERAGE aggregation)
+        this.fetchTelemetry(deviceUUID, ['Current_Avg'], timeRanges.last365days.start, timeRanges.last365days.end, {
+          agg: 'AVG',
+          interval: 24 * 60 * 60 * 1000, // 1 day (will group into months on frontend)
+        }),
       ])
 
       // Extract values from responses
@@ -167,11 +176,12 @@ export class CurrentService {
       const lastHourMax = this.extractSingleValue(lastHourMaxData, 'Current_Avg')
       const todayAverage = this.extractSingleValue(todayAvgData, 'Current_Avg')
 
-      // Extract array data
-      const widgetDataArray = this.extractTimeseriesData(widgetData, 'Current_Avg')
-      const hourlyDataArray = this.extractTimeseriesData(hourlyData, 'Current_Avg')
-      const dailyWeekDataArray = this.extractTimeseriesData(dailyWeekData, 'Current_Avg')
-      const dailyMonthDataArray = this.extractTimeseriesData(dailyMonthData, 'Current_Avg')
+      // Extract array data and sort by timestamp (oldest to newest)
+      const widgetDataArray = this.extractTimeseriesData(widgetData, 'Current_Avg').sort((a, b) => a.ts - b.ts)
+      const hourlyDataArray = this.extractTimeseriesData(hourlyData, 'Current_Avg').sort((a, b) => a.ts - b.ts)
+      const dailyWeekDataArray = this.extractTimeseriesData(dailyWeekData, 'Current_Avg').sort((a, b) => a.ts - b.ts)
+      const dailyMonthDataArray = this.fillMonthDays(this.extractTimeseriesData(dailyMonthData, 'Current_Avg').sort((a, b) => a.ts - b.ts))
+      const dailyYearDataArray = this.aggregateToMonths(this.extractTimeseriesData(dailyYearData, 'Current_Avg'))
 
       // Build debug info if requested
       const debugInfo = debug
@@ -254,6 +264,15 @@ export class CurrentService {
                 agg: 'AVG',
                 resultPoints: dailyMonthDataArray.length,
               },
+              {
+                id: 'dailyYearData',
+                keys: ['Current_Avg'],
+                startTs: timeRanges.last365days.start,
+                endTs: timeRanges.last365days.end,
+                interval: 24 * 60 * 60 * 1000,
+                agg: 'AVG',
+                resultPoints: dailyYearDataArray.length,
+              },
             ],
           }
         : undefined
@@ -268,6 +287,7 @@ export class CurrentService {
         hourlyDataPoints: hourlyDataArray.length,
         dailyWeekDataPoints: dailyWeekDataArray.length,
         dailyMonthDataPoints: dailyMonthDataArray.length,
+        dailyYearDataPoints: dailyYearDataArray.length,
       })
 
       return {
@@ -282,6 +302,7 @@ export class CurrentService {
           widgetData: widgetDataArray,
           dailyWeekData: dailyWeekDataArray,
           dailyMonthData: dailyMonthDataArray,
+          dailyYearData: dailyYearDataArray,
         },
         meta: {
           deviceUUID,
@@ -322,6 +343,10 @@ export class CurrentService {
     const last30daysStart = now - 30 * 24 * 60 * 60 * 1000
     const last30daysEnd = now
 
+    // Last 365 days (1 year)
+    const last365daysStart = now - 365 * 24 * 60 * 60 * 1000
+    const last365daysEnd = now
+
     return {
       today: {
         start: todayStartTs,
@@ -342,6 +367,10 @@ export class CurrentService {
       last30days: {
         start: last30daysStart,
         end: last30daysEnd,
+      },
+      last365days: {
+        start: last365daysStart,
+        end: last365daysEnd,
       },
     }
   }
@@ -404,7 +433,7 @@ export class CurrentService {
   /**
    * Extract timeseries array from telemetry response
    */
-  private extractTimeseriesData(data: any, key: string): Array<{ ts: number; value: number }> {
+  private extractTimeseriesData(data: any, key: string): Array<{ ts: number; date: string; value: number }> {
     if (!data || !data[key] || !Array.isArray(data[key])) {
       return []
     }
@@ -412,8 +441,167 @@ export class CurrentService {
     return data[key]
       .map((point: any) => ({
         ts: point.ts,
+        date: new Date(point.ts).toISOString(),
         value: parseFloat(point.value),
       }))
       .filter((point: any) => !isNaN(point.value))
+  }
+
+  /**
+   * Fill all days in the month with null values for days without data
+   * This ensures charts show gaps for missing data
+   */
+  private fillMonthDays(monthData: Array<{ ts: number; date: string; value: number }>): Array<{ ts: number; date: string; value: number | null }> {
+    if (!monthData || monthData.length === 0) {
+      // Return current month with all days as null if no data
+      const now = new Date()
+      const year = now.getFullYear()
+      const month = now.getMonth()
+      const daysInMonth = new Date(year, month + 1, 0).getDate()
+      
+      const result: Array<{ ts: number; date: string; value: number | null }> = []
+      for (let day = 1; day <= daysInMonth; day++) {
+        const date = new Date(year, month, day)
+        const dateStr = `${String(day).padStart(2, '0')}/${String(month + 1).padStart(2, '0')}/${year}`
+        result.push({
+          ts: date.getTime(),
+          date: dateStr,
+          value: null
+        })
+      }
+      return result
+    }
+
+    // Find the date range in the data
+    const timestamps = monthData.map(d => d.ts)
+    const minTs = Math.min(...timestamps)
+    const maxTs = Math.max(...timestamps)
+    
+    const startDate = new Date(minTs)
+    const endDate = new Date(maxTs)
+    
+    // Get the month and year from the data
+    const year = startDate.getFullYear()
+    const month = startDate.getMonth()
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    
+    this.logger.info(`[fillMonthDays] Filling month ${month + 1}/${year} with ${daysInMonth} days (data points: ${monthData.length})`)
+    
+    // Create a map of existing data by day
+    const dataByDay = new Map<number, number>()
+    monthData.forEach(point => {
+      const date = new Date(point.ts)
+      if (date.getFullYear() === year && date.getMonth() === month) {
+        const day = date.getDate()
+        dataByDay.set(day, point.value)
+      }
+    })
+    
+    // Generate all days in the month
+    const result: Array<{ ts: number; date: string; value: number | null }> = []
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(year, month, day, 0, 0, 0, 0)
+      const dateStr = `${String(day).padStart(2, '0')}/${String(month + 1).padStart(2, '0')}/${year}`
+      result.push({
+        ts: date.getTime(),
+        date: dateStr,
+        value: dataByDay.has(day) ? dataByDay.get(day)! : null
+      })
+    }
+    
+    this.logger.info(`[fillMonthDays] Filled ${result.length} days (${dataByDay.size} with data, ${result.length - dataByDay.size} gaps)`)
+    
+    return result
+  }
+
+  /**
+   * Aggregate daily data into monthly data for yearly view
+   * Groups data by month and calculates average value per month
+   */
+  private aggregateToMonths(dailyData: Array<{ ts: number; date: string; value: number }>): Array<{ ts: number; date: string; month: number; monthYear: string; value: number | null }> {
+    // If no data, return all 12 months of current year with null values
+    if (!dailyData || dailyData.length === 0) {
+      const now = new Date()
+      const currentYear = now.getUTCFullYear()
+      const result: Array<{ ts: number; date: string; month: number; monthYear: string; value: null }> = []
+      
+      for (let month = 1; month <= 12; month++) {
+        const firstDayOfMonth = new Date(Date.UTC(currentYear, month - 1, 1))
+        result.push({
+          ts: firstDayOfMonth.getTime(),
+          date: firstDayOfMonth.toISOString(),
+          month: month,
+          monthYear: `${String(month).padStart(2, '0')}/${currentYear}`,
+          value: null,
+        })
+      }
+      return result
+    }
+
+    this.logger.info(`[aggregateToMonths] Processing ${dailyData.length} daily data points`)
+
+    const monthBuckets = new Map<string, { values: number[]; ts: number; month: number; year: number }>()
+    const yearsSet = new Set<number>()
+
+    // Group data by month (YYYY-MM format) and track years
+    dailyData.forEach(point => {
+      const date = new Date(point.ts)
+      const year = date.getUTCFullYear()
+      const monthNum = date.getUTCMonth() + 1
+      const monthKey = `${year}-${String(monthNum).padStart(2, '0')}`
+      yearsSet.add(year)
+
+      if (!monthBuckets.has(monthKey)) {
+        // Set ts to first day of month in UTC
+        const firstDayOfMonth = new Date(Date.UTC(year, monthNum - 1, 1))
+        monthBuckets.set(monthKey, {
+          values: [],
+          ts: firstDayOfMonth.getTime(),
+          month: monthNum, // 1-12
+          year: year,
+        })
+      }
+
+      monthBuckets.get(monthKey)!.values.push(point.value)
+    })
+
+    this.logger.info(`[aggregateToMonths] Grouped into ${monthBuckets.size} months: ${Array.from(monthBuckets.keys()).join(', ')}`)
+
+    // Build result with all 12 months for each year, filling missing months with null
+    const result: Array<{ ts: number; date: string; month: number; monthYear: string; value: number | null }> = []
+    const sortedYears = Array.from(yearsSet).sort()
+    
+    for (const year of sortedYears) {
+      for (let month = 1; month <= 12; month++) {
+        const monthKey = `${year}-${String(month).padStart(2, '0')}`
+        const firstDayOfMonth = new Date(Date.UTC(year, month - 1, 1))
+        
+        if (monthBuckets.has(monthKey)) {
+          const data = monthBuckets.get(monthKey)!
+          const average = data.values.reduce((a, b) => a + b, 0) / data.values.length
+          result.push({
+            ts: data.ts,
+            date: new Date(data.ts).toISOString(),
+            month: month,
+            monthYear: `${String(month).padStart(2, '0')}/${year}`,
+            value: average,
+          })
+          this.logger.info(`[aggregateToMonths] ${monthKey}: ${data.values.length} days, avg=${average.toFixed(2)}`)
+        } else {
+          // Add month with null value for missing data
+          result.push({
+            ts: firstDayOfMonth.getTime(),
+            date: firstDayOfMonth.toISOString(),
+            month: month,
+            monthYear: `${String(month).padStart(2, '0')}/${year}`,
+            value: null,
+          })
+          this.logger.info(`[aggregateToMonths] ${monthKey}: no data, value=null`)
+        }
+      }
+    }
+
+    // Sort by timestamp
+    return result.sort((a, b) => a.ts - b.ts)
   }
 }

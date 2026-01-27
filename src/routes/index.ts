@@ -33,3 +33,8 @@ routes.use("/api/telemetry", (req, res, next) => {
   // Initialize telemetry router on first request (lazy loading)
   ensureTelemetryRouter()(req, res, next);
 });
+// Also support legacy /telemetry route without /api prefix
+routes.use("/telemetry", (req, res, next) => {
+  // Initialize telemetry router on first request (lazy loading)
+  ensureTelemetryRouter()(req, res, next);
+});
