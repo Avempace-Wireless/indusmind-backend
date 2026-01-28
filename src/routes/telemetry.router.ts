@@ -6,6 +6,7 @@ import { DeviceService } from '../services/device.service.js'
 import { KPICalculatorService } from '../services/kpi-calculator.service.js'
 import { PuissanceService } from '../services/puissance.service.js'
 import { CurrentService } from '../services/current.service.js'
+import { ThermalService } from '../services/thermal.service.js'
 import { createEnergyHistoryController } from '../controllers/energy-history.controller.js'
 
 const routerLogger = logger.child({ module: 'TelemetryRouter' })
@@ -18,6 +19,7 @@ const routerLogger = logger.child({ module: 'TelemetryRouter' })
  * - GET /api/telemetry/:deviceUUID/kpis - Get calculated KPI values for device
  * - GET /api/telemetry/:deviceUUID/puissance - Get all Puissance view KPI values
  * - GET /api/telemetry/:deviceUUID/current - Get all Current view KPI values
+ * - GET /api/telemetry/thermal - Get all thermal management sensor data
  * - GET /api/telemetry/timeseries - Legacy endpoint with explicit entity type and ID
  */
 export function createTelemetryRoutes(
@@ -29,6 +31,7 @@ export function createTelemetryRoutes(
   const kpiCalculator = new KPICalculatorService()
   const puissanceService = new PuissanceService(telemetryService, deviceService)
   const currentService = new CurrentService(telemetryService, deviceService)
+  const thermalService = new ThermalService(telemetryService, deviceService)
   const { getEnergyHistory, getDeviceEnergyHistory, getAvailableMetrics } = createEnergyHistoryController(telemetryService)
 
   /**
@@ -682,6 +685,194 @@ export function createTelemetryRoutes(
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)
       routerLogger.error(`[Current] Request failed: ${errorMsg}`)
+
+      return res.status(502).json({
+        success: false,
+        error: errorMsg,
+      })
+    }
+  })
+
+  /**
+   * GET /api/telemetry/thermal
+   *
+   * Get all thermal management sensor data
+   * Fetches all T_Sensor devices and their telemetry + metadata
+   * 
+   * Telemetry keys: Temperature, Humidity, DewPoint, RawSht3xData, Time
+   * Metadata keys: active, label, powerStatus, displayName, hideAutoMode, delay
+   *
+   * Query Parameters:
+   * - debug (optional): boolean - include debug information about requests made
+   *
+   * Example:
+   * GET /api/telemetry/thermal?debug=true
+   *
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": {
+   *     "sensors": [
+   *       {
+   *         "id": 1,
+   *         "deviceUUID": "abc-123",
+   *         "name": "T_Sensor_Zone_A",
+   *         "label": "Temperature Sensor A",
+   *         "zone": "Zone A",
+   *         "active": true,
+   *         "powerStatus": true,
+   *         "displayName": "Zone A Sensor",
+   *         "hideAutoMode": false,
+   *         "delay": 5000,
+   *         "temperature": 21.5,
+   *         "humidity": 45.2,
+   *         "dewPoint": 9.8,
+   *         "rawData": { "Temperature": 21.5, "Humidity": 45.2, "DewPoint": 9.8 },
+   *         "timestamp": "2026-01-28T10:30:00.000Z",
+   *         "lastUpdate": 1706438400000
+   *       }
+   *     ],
+   *     "summary": {
+   *       "totalSensors": 8,
+   *       "activeSensors": 6,
+   *       "averageTemperature": 22.3,
+   *       "minTemperature": 19.5,
+   *       "maxTemperature": 25.1
+   *     }
+   *   },
+   *   "meta": {
+   *     "requestedAt": 1706438400000,
+   *     "sensorCount": 8
+   *   },
+   *   "debug": { ... } // if debug=true
+   * }
+   */
+  router.get('/thermal', async (req: Request, res: Response) => {
+    try {
+      const { debug } = req.query
+
+      const includeDebug = debug && String(debug).toLowerCase() === 'true' ? true : false
+
+      routerLogger.info('[Thermal] Request for thermal management data', { debug: includeDebug })
+
+      // Get thermal management data
+      const result = await thermalService.getThermalManagementData(includeDebug)
+
+      return res.json(result)
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      routerLogger.error(`[Thermal] Request failed: ${errorMsg}`)
+
+      return res.status(502).json({
+        success: false,
+        error: errorMsg,
+      })
+    }
+  })
+
+  /**
+   * GET /api/telemetry/thermal/chart-data
+   *
+   * Get aggregated temperature data for charts
+   * 24-hour window, hourly intervals, average aggregation
+   * Optional query params:
+   * - sensorIds (comma-separated UUIDs to filter)
+   * - startTimestamp (Unix timestamp in ms, will align to HH:00:00. If not provided, uses current hour)
+   *
+   * GET http://localhost:4000/api/telemetry/thermal/chart-data
+   * GET http://localhost:4000/api/telemetry/thermal/chart-data?sensorIds=uuid1,uuid2
+   * GET http://localhost:4000/api/telemetry/thermal/chart-data?startTimestamp=1706400000000
+   * GET http://localhost:4000/api/telemetry/thermal/chart-data?sensorIds=uuid1&startTimestamp=1706400000000
+   */
+  router.get('/thermal/chart-data', async (req: Request, res: Response) => {
+    try {
+      const { sensorIds, startTimestamp } = req.query
+
+      routerLogger.info('[Thermal] Request for temperature chart data')
+
+      // Parse sensor IDs if provided
+      let sensorIdArray: string[] | undefined
+      if (sensorIds && typeof sensorIds === 'string') {
+        sensorIdArray = sensorIds.split(',').map(id => id.trim()).filter(id => id.length > 0)
+      }
+
+      // Parse start timestamp if provided
+      let startTs: number | undefined
+      if (startTimestamp && typeof startTimestamp === 'string') {
+        const parsed = parseInt(startTimestamp, 10)
+        if (!isNaN(parsed) && parsed > 0) {
+          startTs = parsed
+          routerLogger.info(`[Thermal] Using provided start timestamp: ${startTs}`)
+        } else {
+          routerLogger.warn(`[Thermal] Invalid start timestamp provided: ${startTimestamp}`)
+        }
+      }
+
+      // Get temperature chart data
+      const result = await thermalService.getTemperatureChartData(sensorIdArray, startTs)
+
+      return res.json(result)
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      routerLogger.error(`[Thermal] Chart data request failed: ${errorMsg}`)
+
+      return res.status(502).json({
+        success: false,
+        error: errorMsg,
+      })
+    }
+  })
+
+  /**
+   * POST /api/telemetry/thermal/relay-control
+   *
+   * Control relay (start/stop) for a temperature sensor zone
+   * Sends RPC command to ThingsBoard device
+   *
+   * Request Body:
+   * {
+   *   "deviceUUID": "string - UUID of the device",
+   *   "action": "start" | "stop"
+   * }
+   *
+   * Example:
+   * POST /api/telemetry/thermal/relay-control
+   * {
+   *   "deviceUUID": "411670b0-ad1a-11f0-a05e-97f672464deb",
+   *   "action": "start"
+   * }
+   */
+  router.post('/thermal/relay-control', async (req: Request, res: Response) => {
+    try {
+      const { deviceUUID, action } = req.body
+
+      if (!deviceUUID || !action) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing required fields: deviceUUID, action'
+        })
+      }
+
+      if (!['start', 'stop'].includes(action)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid action: must be "start" or "stop"'
+        })
+      }
+
+      routerLogger.info(`[Thermal] Relay control request: ${action} for device ${deviceUUID}`)
+
+      // Call thermal service to control relay
+      const result = await thermalService.controlRelay(deviceUUID, action)
+
+      if (result.success) {
+        return res.status(200).json(result)
+      } else {
+        return res.status(502).json(result)
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      routerLogger.error(`[Thermal] Relay control failed: ${errorMsg}`)
 
       return res.status(502).json({
         success: false,

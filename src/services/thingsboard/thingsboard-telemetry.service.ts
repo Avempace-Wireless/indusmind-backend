@@ -224,6 +224,243 @@ export class ThingsboardTelemetryService {
   }
 
   /**
+   * Retrieve latest attribute values from ThingsBoard
+   * GET /api/plugins/telemetry/{entityType}/{entityId}/values/attributes
+   *
+   * @param entityType - Type of entity (e.g., DEVICE)
+   * @param entityId - UUID of the entity
+   * @param keys - Array of attribute keys to retrieve
+   */
+  async getLatestAttributes(
+    entityType: string,
+    entityId: string,
+    keys: string[]
+  ): Promise<Record<string, any> | null> {
+    return this.getLatestAttributesWithRetry(entityType, entityId, keys, 0)
+  }
+
+  /**
+   * Retrieve attributes with automatic retry on 401 (token expired)
+   */
+  private async getLatestAttributesWithRetry(
+    entityType: string,
+    entityId: string,
+    keys: string[],
+    retryCount: number = 0
+  ): Promise<Record<string, any> | null> {
+    try {
+      const client = await this.authService.getAuthenticatedClient()
+
+      // Build query parameters
+      const params: Record<string, string> = {
+        keys: keys.join(','),
+      }
+
+      const endpoint = `/api/plugins/telemetry/${entityType}/${entityId}/values/attributes`
+
+      this.logger.info(
+        `Fetching attributes: ${entityType}/${entityId} keys=${keys.join(',')}`
+      )
+
+      const response = await client.get(endpoint, {
+        params,
+        validateStatus: () => true, // Handle all status codes
+      })
+
+      this.logger.info(
+        `Attributes API Response Status: ${response.status}`
+      )
+
+      if (response.status === 200) {
+        // ThingsBoard returns attributes as an array of objects with "key" and "value" properties
+        const attributes = response.data
+        if (Array.isArray(attributes)) {
+          // Convert array to object for easier access
+          const attributesObj: Record<string, any> = {}
+          for (const attr of attributes) {
+            if (attr.key && attr.value !== undefined) {
+              attributesObj[attr.key] = attr.value
+            }
+          }
+          this.logger.info(
+            `Successfully retrieved ${Object.keys(attributesObj).length} attributes for ${entityId}`
+          )
+          return attributesObj
+        }
+        return response.data
+      }
+
+      if (response.status === 401 && retryCount < this.maxRetries) {
+        // Token expired, refresh and retry
+        this.logger.warn(
+          `Received 401, refreshing token and retrying (attempt ${retryCount + 1}/${this.maxRetries})`
+        )
+
+        // Wait a bit before retrying
+        await this.delay(this.retryDelayMs)
+
+        // Refresh token
+        await this.authService.refreshToken()
+
+        // Retry the request
+        return this.getLatestAttributesWithRetry(entityType, entityId, keys, retryCount + 1)
+      }
+
+      if (response.status === 404) {
+        this.logger.warn(`Entity not found: ${entityType}/${entityId} (404)`)
+        return null
+      }
+
+      if (response.status === 400) {
+        throw new Error(
+          `Bad request: ${response.data?.message || 'Invalid parameters'}`
+        )
+      }
+
+      throw new Error(
+        `ThingsBoard API error: ${response.status} ${response.statusText}\n${JSON.stringify(response.data)}`
+      )
+    } catch (error) {
+      if (error instanceof AxiosError) {
+        this.logger.error(
+          `Attributes request failed: ${error.message}. Status: ${error.response?.status}`
+        )
+      } else {
+        const errorMsg = error instanceof Error ? error.message : String(error)
+        this.logger.error(`Attributes fetch failed: ${errorMsg}`)
+      }
+      // Return null for failed attribute fetches (not critical)
+      return null
+    }
+  }
+
+  /**
+   * Update server attributes on a ThingsBoard device
+   * POST /api/plugins/telemetry/{entityType}/{entityId}/attributes
+   *
+   * @param entityType - Type of entity (e.g., DEVICE)
+   * @param entityId - UUID of the entity (device ID)
+   * @param attributes - Object with attribute keys and values to update
+   */
+  async updateAttributes(
+    entityType: string,
+    entityId: string,
+    attributes: Record<string, any>
+  ): Promise<any> {
+    try {
+      const client = await this.authService.getAuthenticatedClient()
+
+      const endpoint = `/api/plugins/telemetry/${entityType}/${entityId}/attributes`
+
+      this.logger.info(
+        `Updating attributes for device ${entityId}: ${JSON.stringify(attributes)}`
+      )
+
+      const response = await client.post(endpoint, attributes, {
+        validateStatus: () => true, // Handle all status codes
+      })
+
+      if (response.status === 200 || response.status === 204) {
+        this.logger.info(`Attributes updated successfully for ${entityId}`)
+        return response.data || { success: true }
+      }
+
+      if (response.status === 401) {
+        // Token expired, refresh and retry
+        this.logger.warn(`Received 401, refreshing token and retrying`)
+        await this.authService.refreshToken()
+
+        const retryResponse = await client.post(endpoint, attributes, {
+          validateStatus: () => true,
+        })
+
+        if (retryResponse.status === 200 || retryResponse.status === 204) {
+          this.logger.info(`Attributes updated successfully after token refresh`)
+          return retryResponse.data || { success: true }
+        }
+
+        throw new Error(`Update attributes failed after token refresh: ${retryResponse.status}`)
+      }
+
+      throw new Error(
+        `Update attributes failed: ${response.status} ${response.statusText}\n${JSON.stringify(response.data)}`
+      )
+    } catch (error) {
+      if (error instanceof AxiosError) {
+        this.logger.error(`Update attributes request failed: ${error.message}. Status: ${error.response?.status}`)
+      } else {
+        const errorMsg = error instanceof Error ? error.message : String(error)
+        this.logger.error(`Update attributes failed: ${errorMsg}`)
+      }
+      throw error
+    }
+  }
+
+  /**
+   * Send RPC command to ThingsBoard device
+   * POST /api/plugins/rpc/oneway/{deviceId}
+   * 
+   * @param entityType - Type of entity (e.g., DEVICE) - kept for backward compatibility but not used in endpoint
+   * @param entityId - UUID of the entity (device ID)
+   * @param command - RPC command object with method and params
+   */
+  async sendRPCCommand(
+    entityType: string,
+    entityId: string,
+    command: { method: string; params: Record<string, any> }
+  ): Promise<any> {
+    try {
+      const client = await this.authService.getAuthenticatedClient()
+
+      // ThingsBoard RPC endpoint format: /api/plugins/rpc/oneway/{deviceId}
+      // Note: entityType is not used in the actual endpoint URL
+      const endpoint = `/api/plugins/rpc/oneway/${entityId}`
+
+      this.logger.info(
+        `Sending RPC command to device ${entityId}: ${command.method}`
+      )
+
+      const response = await client.post(endpoint, command, {
+        validateStatus: () => true, // Handle all status codes
+      })
+
+      if (response.status === 200 || response.status === 204) {
+        this.logger.info(`RPC command sent successfully to ${entityId}`)
+        return response.data || { success: true }
+      }
+
+      if (response.status === 401) {
+        // Token expired, refresh and retry
+        this.logger.warn(`Received 401, refreshing token and retrying`)
+        await this.authService.refreshToken()
+
+        const retryResponse = await client.post(endpoint, command, {
+          validateStatus: () => true,
+        })
+
+        if (retryResponse.status === 200 || retryResponse.status === 204) {
+          this.logger.info(`RPC command sent successfully after token refresh`)
+          return retryResponse.data || { success: true }
+        }
+
+        throw new Error(`RPC command failed after token refresh: ${retryResponse.status}`)
+      }
+
+      throw new Error(
+        `RPC command failed: ${response.status} ${response.statusText}\n${JSON.stringify(response.data)}`
+      )
+    } catch (error) {
+      if (error instanceof AxiosError) {
+        this.logger.error(`RPC request failed: ${error.message}. Status: ${error.response?.status}`)
+      } else {
+        const errorMsg = error instanceof Error ? error.message : String(error)
+        this.logger.error(`RPC command failed: ${errorMsg}`)
+      }
+      throw error
+    }
+  }
+
+  /**
    * Helper: delay execution
    */
   private delay(ms: number): Promise<void> {
