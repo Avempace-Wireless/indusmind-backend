@@ -7,6 +7,7 @@ import { KPICalculatorService } from '../services/kpi-calculator.service.js'
 import { PuissanceService } from '../services/puissance.service.js'
 import { CurrentService } from '../services/current.service.js'
 import { ThermalService } from '../services/thermal.service.js'
+import { GlobalMetersService } from '../services/global-meters.service.js'
 import { createEnergyHistoryController } from '../controllers/energy-history.controller.js'
 
 const routerLogger = logger.child({ module: 'TelemetryRouter' })
@@ -32,6 +33,7 @@ export function createTelemetryRoutes(
   const puissanceService = new PuissanceService(telemetryService, deviceService)
   const currentService = new CurrentService(telemetryService, deviceService)
   const thermalService = new ThermalService(telemetryService, deviceService)
+  const globalMetersService = new GlobalMetersService(telemetryService, deviceService)
   const { getEnergyHistory, getDeviceEnergyHistory, getAvailableMetrics } = createEnergyHistoryController(telemetryService)
 
   /**
@@ -873,6 +875,125 @@ export function createTelemetryRoutes(
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)
       routerLogger.error(`[Thermal] Relay control failed: ${errorMsg}`)
+
+      return res.status(502).json({
+        success: false,
+        error: errorMsg,
+      })
+    }
+  })
+
+  /**
+   * POST /api/telemetry/global-meters
+   * Get telemetry data for multiple meters (for factory display)
+   *
+   * Request body:
+   * {
+   *   "deviceUUIDs": ["uuid1", "uuid2", "uuid3"],
+   *   "debug": false
+   * }
+   *
+   * Returns all needed data for GlobalMetersView:
+   * - instantaneous power (kW)
+   * - today's consumption (kWh)
+   * - yesterday's consumption (kWh)
+   * - hourly data for charts
+   * - daily data for charts
+   */
+  router.post('/global-meters', async (req: Request, res: Response) => {
+    try {
+      const { deviceUUIDs, debug = false } = req.body
+
+      if (!deviceUUIDs || !Array.isArray(deviceUUIDs) || deviceUUIDs.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing or invalid required field: deviceUUIDs (array)',
+        })
+      }
+
+      if (debug) {
+        routerLogger.debug(`[GlobalMeters] Fetching data for devices: ${deviceUUIDs.join(', ')}`)
+      }
+
+      const response = await globalMetersService.getGlobalMetersData(deviceUUIDs, debug)
+
+      return res.json(response)
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      routerLogger.error(`[GlobalMeters] Failed to fetch meters data: ${errorMsg}`)
+
+      return res.status(502).json({
+        success: false,
+        error: errorMsg,
+      })
+    }
+  })
+
+  /**
+   * GET /api/telemetry/global-meters/:deviceUUID
+   * Get telemetry data for a single meter
+   *
+   * Path parameters:
+   * - deviceUUID: string - UUID of the device
+   *
+   * Query parameters:
+   * - debug: boolean - Enable debug logging
+   *
+   * Returns data for single meter display
+   */
+  router.get('/global-meters/:deviceUUID', async (req: Request, res: Response) => {
+    try {
+      const { deviceUUID } = req.params
+      const { debug = false } = req.query
+
+      if (!deviceUUID) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing required parameter: deviceUUID',
+        })
+      }
+
+      if (debug === 'true') {
+        routerLogger.debug(`[GlobalMeters] Fetching data for device: ${deviceUUID}`)
+      }
+
+      const response = await globalMetersService.getGlobalMetersData([deviceUUID], debug === 'true')
+
+      return res.json(response)
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      routerLogger.error(`[GlobalMeters] Failed to fetch meter data for ${req.params.deviceUUID}: ${errorMsg}`)
+
+      return res.status(502).json({
+        success: false,
+        error: errorMsg,
+      })
+    }
+  })
+
+  /**
+   * POST /api/telemetry/global-meters/temperature-chart
+   * Get 24-hour temperature chart data for temperature sensors
+   *
+   * Request body:
+   * {
+   *   "sensorIds": ["uuid1", "uuid2"] // optional, if omitted returns all sensors
+   * }
+   *
+   * Returns temperature data for the last 24 hours with hourly averages
+   */
+  router.post('/global-meters/temperature-chart', async (req: Request, res: Response) => {
+    try {
+      const { sensorIds } = req.body
+
+      routerLogger.debug(`[GlobalMeters] Fetching temperature chart data`)
+
+      const response = await globalMetersService.getTemperatureChartData(sensorIds)
+
+      return res.json(response)
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      routerLogger.error(`[GlobalMeters] Failed to fetch temperature chart data: ${errorMsg}`)
 
       return res.status(502).json({
         success: false,
