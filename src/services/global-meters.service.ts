@@ -326,7 +326,8 @@ export class GlobalMetersService {
    * Fetches temperature data from T_Sensor devices for the last 24 hours
    */
   async getTemperatureChartData(
-    sensorIds?: string[]
+    sensorIds?: string[],
+    startTimestamp?: number
   ): Promise<{
     success: boolean
     data: {
@@ -343,13 +344,31 @@ export class GlobalMetersService {
     }
   }> {
     try {
-      // Calculate 24-hour window
-      const now = Date.now()
-      const startTs = now - 24 * 60 * 60 * 1000 // 24 hours ago
-      const endTs = now
+      // Calculate 24-hour window with aligned start time
+      let alignedStartTs: number
+
+      if (startTimestamp) {
+        // If timestamp provided, align to the start of that hour
+        const startDate = new Date(startTimestamp)
+        startDate.setMinutes(0, 0, 0) // Set to HH:00:00
+        alignedStartTs = startDate.getTime()
+        this.logger.info(`[GlobalMeters] Using provided start timestamp: ${alignedStartTs} (${startDate.toISOString()})`)
+      } else {
+        // Default: use current time aligned to start of current hour
+        const now = new Date()
+        now.setMinutes(30, 0, 0) // Set to HH:00:00
+        alignedStartTs = now.getTime() 
+        this.logger.info(`[GlobalMeters] Using current hour start: ${alignedStartTs} (${new Date(alignedStartTs).toISOString()})`)
+      }
+      
+      // Calculate 24-hour window from aligned hour
+      const startTs = alignedStartTs - 24 * 60 * 60 * 1000 // 24 hours back from current hour start
+      const endTs = alignedStartTs // End at current hour boundary
       const interval = 60 * 60 * 1000 // 1 hour intervals
 
       this.logger.info(`[GlobalMeters] Fetching temperature chart data for 24 hours`)
+      this.logger.info(`[GlobalMeters] Start time: ${new Date(startTs).toISOString()} (${new Date(startTs).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })})`)
+      this.logger.info(`[GlobalMeters] End time: ${new Date(endTs).toISOString()} (${new Date(endTs).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })})`)
 
       // Get all devices
       const allDevices = await this.deviceService.getDevices()
