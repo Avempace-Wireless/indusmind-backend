@@ -29,6 +29,11 @@ routes.use("/health", healthRouter);
 routes.use("/users", userRouter);
 routes.use("/auth", authRouter);
 routes.use("/customer", customerRouter);
+routes.use("/api/telemetry", (req, res, next) => {
+  // Initialize telemetry router on first request (lazy loading)
+  ensureTelemetryRouter()(req, res, next);
+});
+// Also support legacy /telemetry route without /api prefix
 routes.use("/telemetry", (req, res, next) => {
   // Initialize telemetry router on first request (lazy loading)
   ensureTelemetryRouter()(req, res, next);
