@@ -3,8 +3,8 @@
  */
 
 import { Request, Response } from 'express'
-import { EnergyHistoryService } from '@/services/energy-history.service.js'
-import type { ThingsboardTelemetryService } from '@/services/thingsboard/thingsboard-telemetry.service.js'
+import { EnergyHistoryService } from '../services/energy-history.service.js'
+import type { ThingsboardTelemetryService } from '../services/thingsboard/thingsboard-telemetry.service.js'
 
 /**
  * Create energy history controller handlers
