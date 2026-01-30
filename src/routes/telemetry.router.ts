@@ -1007,5 +1007,169 @@ export function createTelemetryRoutes(
   router.get('/:deviceUUID/energy-history', getDeviceEnergyHistory)
   router.get('/:deviceUUID/available-metrics', getAvailableMetrics)
 
+  /**
+   * GET /api/telemetry/equipmentTelemetry
+   *
+   * Fetch latest telemetry values for ALL customer devices
+   * Optimized bulk endpoint for Equipment view display
+   * Returns latest value for each device with activity status
+   *
+   * Query Parameters:
+   * - keys (optional): string - comma-separated telemetry keys to fetch
+   *   If not specified, will fetch default keys based on device type
+   *
+   * Example:
+   * GET /api/telemetry/equipmentTelemetry?keys=ActivePowerTotal,Temperature
+   * GET /api/telemetry/equipmentTelemetry
+   *
+   * Response:
+   * {
+   *   "success": true,
+   *   "data": [
+   *     {
+   *       "deviceUUID": "device-uuid",
+   *       "deviceName": "PM2200-TGBT-1",
+   *       "label": "Main Meter",
+   *       "active": true,
+   *       "lastActivityTime": 1705932000000,
+   *       "telemetry": {
+   *         "ActivePowerTotal": { "ts": 1705932000000, "value": 45.2 }
+   *       }
+   *     }
+   *   ],
+   *   "count": 5
+   * }
+   */
+  router.get('/equipmentTelemetry', async (req: Request, res: Response) => {
+    try {
+      const { keys } = req.query
+
+      // Get all customer devices
+      const devices = await deviceService.getDevices(false)
+
+      if (!devices || devices.length === 0) {
+        return res.json({
+          success: true,
+          data: [],
+          count: 0,
+        })
+      }
+
+      // Fetch latest telemetry for all devices in parallel
+      const telemetryPromises = devices.map(async (device) => {
+        try {
+          // Determine keys to fetch based on device name
+          let keysToFetch: string[] = []
+          if (keys) {
+            keysToFetch = String(keys)
+              .split(',')
+              .map((k) => k.trim())
+              .filter((k) => k.length > 0)
+          } else {
+            // Use default keys based on device type (capitalized ThingsBoard keys)
+            const deviceName = device.name || ''
+            if (deviceName.includes('PM2200')) {
+              keysToFetch = ['ActivePowerTotal', 'AccumulatedActiveEnergyDelivered']
+            } else if (deviceName.includes('t_sensor')) {
+              keysToFetch = ['Temperature', 'Humidity']
+            } else if (deviceName.includes('Controller')) {
+              keysToFetch = ['active', 'online']
+            } else {
+              keysToFetch = ['ActivePowerTotal', 'Temperature', 'active']
+            }
+          }
+
+          // Fetch latest telemetry from ThingsBoard using getTimeseries
+          // Use 24-hour window, DESC order, limit 1 to get latest values
+          const now = Date.now()
+          const last24h = now - 24 * 60 * 60 * 1000
+
+          const telemetryResult = await telemetryService.getTimeseries(
+            'DEVICE',
+            device.deviceUUID,
+            keysToFetch,
+            last24h,
+            now,
+            undefined, // no interval
+            'NONE', // no aggregation
+            'DESC', // descending order (latest first)
+            1 // limit to 1 (latest value)
+          )
+
+          // Transform response: extract latest value for each key
+          const latestTelemetry: Record<string, any> = {}
+          for (const key of keysToFetch) {
+            const values = telemetryResult[key] || []
+            if (values.length > 0) {
+              const latest = values[0]
+              latestTelemetry[key] = {
+                ts: latest.ts || now,
+                value: latest.value,
+              }
+            } else {
+              latestTelemetry[key] = {
+                ts: 0,
+                value: null,
+              }
+            }
+          }
+
+          // Determine if device is active (has recent data)
+          const hasRecentData = Object.values(latestTelemetry).some((data: any) => {
+            const ts = data.ts || 0
+            const fiveMinutesAgo = Date.now() - 5 * 60 * 1000
+            return ts > fiveMinutesAgo
+          })
+
+          // Get max timestamp from all telemetry values
+          const maxTs = Math.max(
+            ...Object.values(latestTelemetry).map((data: any) => data.ts || 0)
+          )
+
+          return {
+            deviceUUID: device.deviceUUID,
+            deviceName: device.name || 'Unknown Device',
+            label: device.label || '',
+            active: hasRecentData,
+            lastActivityTime: maxTs > 0 ? maxTs : null,
+            telemetry: latestTelemetry,
+          }
+        } catch (error) {
+          routerLogger.warn(
+            `Failed to fetch telemetry for device ${device.name || 'Unknown'} (${device.deviceUUID}): ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          )
+
+          // Return device with empty telemetry on error
+          return {
+            deviceUUID: device.deviceUUID,
+            deviceName: device.name || 'Unknown Device',
+            label: device.label || '',
+            active: false,
+            lastActivityTime: null,
+            telemetry: {},
+          }
+        }
+      })
+
+      const telemetryData = await Promise.all(telemetryPromises)
+
+      return res.json({
+        success: true,
+        data: telemetryData,
+        count: telemetryData.length,
+      })
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      routerLogger.error(`Failed to fetch latest telemetry for all devices: ${errorMsg}`)
+
+      return res.status(502).json({
+        success: false,
+        error: errorMsg,
+      })
+    }
+  })
+
   return router
 }

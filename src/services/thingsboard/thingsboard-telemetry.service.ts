@@ -461,6 +461,87 @@ export class ThingsboardTelemetryService {
   }
 
   /**
+   * Retrieve latest telemetry values for a device
+   * GET /api/plugins/telemetry/{entityType}/{entityId}/values/timeseries
+   * with agg=NONE and limit=1 to get only the latest value
+   *
+   * @param deviceUUID - UUID of the device
+   * @param accessToken - Device access token for authentication
+   * @param keys - Array of telemetry keys to retrieve
+   */
+  async getLatestTelemetry(
+    deviceUUID: string,
+    accessToken: string,
+    keys: string[]
+  ): Promise<Record<string, any>> {
+    try {
+      // Get the base URL from auth service
+      const client = await this.authService.getAuthenticatedClient()
+      const baseURL = (client.defaults && client.defaults.baseURL) ? String(client.defaults.baseURL) : ''
+
+      // Create a dedicated client for this device with device access token
+      const { default: axios } = await import('axios')
+      const deviceClient = axios.create({
+        baseURL: baseURL,
+        timeout: 10000,
+        headers: {
+          'X-Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      })
+
+      // Use a 24-hour window to get latest values
+      const endTs = Date.now()
+      const startTs = endTs - 24 * 60 * 60 * 1000 // 24 hours ago
+
+      const endpoint = `/api/plugins/telemetry/DEVICE/${deviceUUID}/values/timeseries`
+
+      const params = {
+        keys: keys.join(','),
+        startTs: startTs.toString(),
+        endTs: endTs.toString(),
+        orderBy: 'DESC',
+        limit: '1',
+        agg: 'NONE',
+      }
+
+      this.logger.info(`Fetching latest telemetry for device ${deviceUUID}, keys: ${keys.join(',')}`)
+
+      const response = await deviceClient.get(endpoint, { params })
+
+      // Transform response to latest values format
+      const latestTelemetry: Record<string, any> = {}
+
+      for (const [key, values] of Object.entries(response.data)) {
+        if (Array.isArray(values) && values.length > 0) {
+          const latest = values[0]
+          latestTelemetry[key] = {
+            ts: latest.ts || Date.now(),
+            value: latest.value,
+          }
+        } else {
+          latestTelemetry[key] = {
+            ts: 0,
+            value: null,
+          }
+        }
+      }
+
+      return latestTelemetry
+    } catch (error) {
+      if (error instanceof AxiosError) {
+        this.logger.error(
+          `Failed to fetch latest telemetry for device ${deviceUUID}: ${error.message}. Status: ${error.response?.status}`
+        )
+      } else {
+        const errorMsg = error instanceof Error ? error.message : String(error)
+        this.logger.error(`Failed to fetch latest telemetry for device ${deviceUUID}: ${errorMsg}`)
+      }
+      throw error
+    }
+  }
+
+  /**
    * Helper: delay execution
    */
   private delay(ms: number): Promise<void> {
